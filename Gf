@@ -1,0 +1,276 @@
+--[[
+    D Combat · เวอร์ชันทดสอบว่า UI ขึ้นไหม
+]]
+
+repeat task.wait() until game:IsLoaded()
+
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local LP = Players.LocalPlayer
+
+-- รอ PlayerGui ให้ชัวร์
+local PlayerGui = LP:WaitForChild("PlayerGui", 10)
+if not PlayerGui then
+    warn("[D Combat] ไม่พบ PlayerGui")
+    return
+end
+
+-- ลบของเก่า
+pcall(function()
+    local old = PlayerGui:FindFirstChild("DCombatUI")
+    if old then old:Destroy() end
+end)
+
+-------------------------------------------------
+-- สร้าง UI ก่อนเลย (สำคัญ)
+-------------------------------------------------
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "DCombatUI"
+Gui.ResetOnSpawn = false
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Gui.Parent = PlayerGui
+
+local Logo = Instance.new("TextButton")
+Logo.Size = UDim2.fromOffset(50, 50)
+Logo.Position = UDim2.new(0, 15, 0.4, 0)
+Logo.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
+Logo.Text = "D"
+Logo.TextColor3 = Color3.new(1, 1, 1)
+Logo.TextSize = 22
+Logo.Font = Enum.Font.GothamBold
+Logo.Parent = Gui
+Instance.new("UICorner", Logo).CornerRadius = UDim.new(1, 0)
+
+local Main = Instance.new("Frame")
+Main.Size = UDim2.fromOffset(230, 280)
+Main.Position = UDim2.new(0, 75, 0.4, -20)
+Main.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
+Main.BorderSizePixel = 0
+Main.Visible = true
+Main.Parent = Gui
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 36)
+Title.BackgroundColor3 = Color3.fromRGB(25, 28, 38)
+Title.BorderSizePixel = 0
+Title.Text = "  D COMBAT"
+Title.TextColor3 = Color3.new(1, 1, 1)
+Title.TextSize = 15
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Main
+Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 10)
+
+local Status = Instance.new("TextLabel")
+Status.Size = UDim2.new(1, -16, 0, 24)
+Status.Position = UDim2.new(0, 8, 0, 42)
+Status.BackgroundTransparency = 1
+Status.Text = "กำลังโหลด..."
+Status.TextColor3 = Color3.fromRGB(180, 190, 210)
+Status.TextSize = 12
+Status.Font = Enum.Font.Gotham
+Status.Parent = Main
+
+print("[D Combat] UI สร้างแล้ว")
+
+-------------------------------------------------
+-- CONFIG
+-------------------------------------------------
+local RANGE = 200
+local DELAY = 0.04
+local HIT_ID = "043adb20"
+
+local Settings = {
+    AutoAttack = false,
+    FastAttack = false,
+    Gather = false,
+    AttackPlayers = false,
+}
+
+-------------------------------------------------
+-- REMOTE
+-------------------------------------------------
+local RegisterAttack, RegisterHit
+local remoteOk = false
+
+pcall(function()
+    local Net = RS:WaitForChild("Modules", 5):WaitForChild("Net", 5)
+    RegisterAttack = Net:WaitForChild("RE/RegisterAttack", 5)
+    RegisterHit = Net:WaitForChild("RE/RegisterHit", 5)
+    if RegisterAttack and RegisterHit then
+        remoteOk = true
+    end
+end)
+
+if remoteOk then
+    Status.Text = "Remote: OK"
+    Status.TextColor3 = Color3.fromRGB(80, 220, 120)
+else
+    Status.Text = "Remote: ไม่พบ (ตีไม่ได้)"
+    Status.TextColor3 = Color3.fromRGB(255, 100, 100)
+end
+
+-------------------------------------------------
+-- HELPERS
+-------------------------------------------------
+local function HRP()
+    local c = LP.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function GetHitPart(m)
+    return m:FindFirstChild("LeftLowerArm")
+        or m:FindFirstChild("LeftUpperArm")
+        or m:FindFirstChild("UpperTorso")
+        or m:FindFirstChild("HumanoidRootPart")
+end
+
+local function IsAlive(m)
+    local h = m and m:FindFirstChildOfClass("Humanoid")
+    return h and h.Health > 0
+end
+
+local function GetTargets()
+    local h = HRP()
+    if not h then return {} end
+    local pos = h.Position
+    local list = {}
+
+    local folder = workspace:FindFirstChild("Enemies")
+    if folder then
+        for _, mob in ipairs(folder:GetChildren()) do
+            if IsAlive(mob) then
+                local root = mob:FindFirstChild("HumanoidRootPart")
+                local part = GetHitPart(mob)
+                if root and part and (root.Position - pos).Magnitude <= RANGE then
+                    table.insert(list, part)
+                end
+            end
+        end
+    end
+
+    if Settings.AttackPlayers then
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr \~= LP and plr.Character and IsAlive(plr.Character) then
+                local root = plr.Character:FindFirstChild("HumanoidRootPart")
+                local part = GetHitPart(plr.Character)
+                if root and part and (root.Position - pos).Magnitude <= RANGE then
+                    table.insert(list, part)
+                end
+            end
+        end
+    end
+    return list
+end
+
+local function DoAttack(targets)
+    if not remoteOk or #targets == 0 then return end
+    pcall(function()
+        RegisterAttack:FireServer(0.4, 1)
+    end)
+    for _, part in ipairs(targets) do
+        pcall(function()
+            local args = {
+                [1] = part,
+                [2] = {},
+                [4] = HIT_ID
+            }
+            RegisterHit:FireServer(unpack(args))
+        end)
+    end
+end
+
+local function GatherMobs()
+    local h = HRP()
+    if not h then return end
+    local folder = workspace:FindFirstChild("Enemies")
+    if not folder then return end
+    local i = 0
+    for _, mob in ipairs(folder:GetChildren()) do
+        if IsAlive(mob) then
+            local root = mob:FindFirstChild("HumanoidRootPart")
+            if root and (root.Position - h.Position).Magnitude <= 400 then
+                i = i + 1
+                local a = (i / 12) * math.pi * 2
+                pcall(function()
+                    root.CFrame = CFrame.new(h.Position + Vector3.new(math.cos(a) * 10, 0, math.sin(a) * 10))
+                    root.AssemblyLinearVelocity = Vector3.zero
+                end)
+            end
+        end
+    end
+end
+
+-------------------------------------------------
+-- ปุ่ม
+-------------------------------------------------
+local function AddBtn(text, key, y)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -16, 0, 32)
+    btn.Position = UDim2.new(0, 8, 0, y)
+    btn.BackgroundColor3 = Color3.fromRGB(32, 36, 48)
+    btn.Text = text .. "  · OFF"
+    btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.TextSize = 13
+    btn.Font = Enum.Font.GothamMedium
+    btn.Parent = Main
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 7)
+
+    btn.MouseButton1Click:Connect(function()
+        Settings[key] = not Settings[key]
+        local on = Settings[key]
+        btn.Text = text .. (on and "  · ON" or "  · OFF")
+        btn.BackgroundColor3 = on and Color3.fromRGB(30, 110, 60) or Color3.fromRGB(32, 36, 48)
+    end)
+end
+
+AddBtn("Auto Attack", "AutoAttack", 72)
+AddBtn("Fast Attack", "FastAttack", 110)
+AddBtn("Gather Mob", "Gather", 148)
+AddBtn("Attack Players", "AttackPlayers", 186)
+
+Logo.MouseButton1Click:Connect(function()
+    Main.Visible = not Main.Visible
+end)
+
+-- ลาก
+local function Drag(frame, handle)
+    local on, s, p
+    handle.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            on = true
+            s = i.Position
+            p = frame.Position
+            i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then on = false end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if on and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            local d = i.Position - s
+            frame.Position = UDim2.new(p.X.Scale, p.X.Offset + d.X, p.Y.Scale, p.Y.Offset + d.Y)
+        end
+    end)
+end
+Drag(Main, Title)
+Drag(Logo, Logo)
+
+-------------------------------------------------
+-- LOOP
+-------------------------------------------------
+task.spawn(function()
+    while true do
+        pcall(function()
+            if Settings.Gather then GatherMobs() end
+            if Settings.AutoAttack then
+                DoAttack(GetTargets())
+            end
+        end)
+        task.wait(Settings.FastAttack and 0.025 or DELAY)
+    end
+end)
+
+print("[D Combat] Ready")
